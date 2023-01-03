@@ -7,8 +7,10 @@ from util import list_connect
 
 
 pg.init()
-SIZE = WIDTH, HEIGHT = 200, 200
+SIZE = WIDTH, HEIGHT = 1280, 720
+SCALED_SIZE = S_WIDTH, S_HEIGHT = [i // 3 for i in SIZE]
 screen = pg.display.set_mode(SIZE)
+display = pg.Surface(SCALED_SIZE)
 
 FPS = 60
 clock = pg.time.Clock()
@@ -17,7 +19,6 @@ all_sprites = pg.sprite.Group()
 player_group = pg.sprite.Group()
 tiles_group = pg.sprite.Group()
 walls_group = pg.sprite.Group()
-
 
 templates = []
 for file in os.listdir(os.path.join('data', 'levels')):
@@ -61,7 +62,7 @@ def generate_level(size):
                 break
 
     map = [[j for j in list_connect(*[templates[i] for i in line]) if j] for line in room_types]
-    return [j for sub in map for j in sub]
+    return list_connect([['1'] for _ in range(size * 8)], [j for sub in map for j in sub], [['1'] for _ in range(size * 8)])
 
 
 def load_image(name, colorkey=None):
@@ -80,24 +81,24 @@ def load_image(name, colorkey=None):
 
 
 def load_level(map):
-    player, x, y = None, None, None
+    x, y = None, None
     for y in range(len(map)):
         for x in range(len(map[y])):
-            if map[y][x] == '0':
+            if map[y][x] in ['0', '@']:
                 Tile('empty', x, y)
             if map[y][x] == '1':
                 Tile('wall', x, y)
 
-    return player, x, y  # player is None for now :P
+    return x, y
 
 
 # initializing all sprite images
 tile_images = {
-    'empty': load_image('grass.png'),
-    'wall': load_image('box.png')
+    'empty': load_image('empty.png'),
+    'wall': load_image('wall.png')
 }
-
-tile_width = tile_height = 50
+player_image = load_image('player.png')
+tile_size = 16
 
 
 class Tile(pg.sprite.Sprite):
@@ -108,37 +109,124 @@ class Tile(pg.sprite.Sprite):
             super().__init__(tiles_group, all_sprites, walls_group)
 
         self.image = tile_images[tile_id]
-        self.rect = self.image.get_rect().move(tile_width  * x, tile_height * y)
+        self.rect = self.image.get_rect().move(tile_size * x, tile_size * y)
 
 
-class Player():
+class Player(pg.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__(player_group, all_sprites)
 
         self.x = x
         self.y = y
+        self.image = player_image
+        self.rect = self.image.get_rect().move(tile_size * x, tile_size * y)
 
-    def move(self):
-        pass
+        self.speed = 2
+        self.y_momentum = 0
+
+    def move(self, movement):
+        collision_types = {'top': False, 'bottom': False, 'right': False, 'left': False}
+        self.rect.x += movement[0]
+
+        hit_list = [tile for tile in walls_group if self.rect.colliderect(tile)]
+        for tile in hit_list:
+            if movement[0] > 0:
+                self.rect.right = tile.rect.left
+                collision_types['right'] = True
+            elif movement[0] < 0:
+                self.rect.left = tile.rect.right
+                collision_types['left'] = True
+
+        self.rect.y += movement[1]
+        hit_list = [tile for tile in walls_group if self.rect.colliderect(tile)]
+        for tile in hit_list:
+            if movement[1] > 0:
+                self.rect.bottom = tile.rect.top
+                collision_types['bottom'] = True
+            elif movement[1] < 0:
+                self.rect.top = tile.rect.bottom
+                collision_types['top'] = True
+
+        return collision_types
+
+
+class Camera:
+    def __init__(self):
+        self.dx = 0
+        self.dy = 0
+
+    def apply(self, obj):
+        obj.rect.x += self.dx
+        obj.rect.y += self.dy
+
+    def update(self, target):
+        self.dx = -(target.rect.x + target.rect.w // 2 - S_WIDTH // 2)
+        self.dy = -(target.rect.y + target.rect.h // 2 - S_HEIGHT // 2)
 
 
 def main():
-    player, level_x, level_y = load_level(generate_level(4))
+    level = generate_level(5)
+
+    level_x, level_y = load_level(level)
+    moving_right = moving_left = False
+    air_timer = 0
+
+    spawns = []
+    for line in enumerate(level[:8]):
+        possibles = [i for i in enumerate(line[1]) if i[1] == '@']
+        spawns += [(i[0], line[0]) for i in possibles]
+    
+    spawn_x, spawn_y = choice(spawns)
+    player = Player(spawn_x, spawn_y)
+    camera = Camera()
 
     run = True
     while run:
+        display.fill((0, 0, 0))
+
+        player_movement = [0, 0]
+        if moving_right:
+            player_movement[0] += player.speed
+        if moving_left:
+            player_movement[0] -= player.speed
+
+        player_movement[1] += player.y_momentum
+        player.y_momentum += 0.4
+        if player.y_momentum > 4:
+            player.y_momentum = 6
+
+        collisions = player.move(player_movement)
+
+        if collisions['bottom']:
+            air_timer = 0
+            player.y_momentum = 0
+        else:
+            air_timer += 1
+
+        camera.update(player)
+        for sprite in all_sprites:
+            camera.apply(sprite)
+
+        all_sprites.draw(display)
+        player_group.draw(display)
+
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 run = False
+                sys.exit()
             if event.type == pg.KEYDOWN:
                 key = pg.key.get_pressed()
-                if key[pg.K_a]:
-                    pass
+                moving_left = key[pg.K_a] or key[pg.K_LEFT]
+                moving_right = key[pg.K_d] or key[pg.K_RIGHT]
+                if key[pg.K_w] or key[pg.K_UP]:
+                    if air_timer < 5:
+                        player.y_momentum = -5
+            if event.type == pg.KEYUP:
+                key = pg.key.get_pressed()
+                moving_left = key[pg.K_a]
+                moving_right = key[pg.K_d]
 
-        screen.fill((0, 0, 0))
-        all_sprites.draw(screen)
-        player_group.draw(screen)
-
+        screen.blit(pg.transform.scale(display, SIZE), (0, 0))
         pg.display.flip()
         clock.tick(FPS)
 
