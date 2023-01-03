@@ -8,7 +8,7 @@ from util import list_connect
 
 pg.init()
 SIZE = WIDTH, HEIGHT = 1280, 720
-SCALED_SIZE = S_WIDTH, S_HEIGHT = [i // 3 for i in SIZE]
+SCALED_SIZE = S_WIDTH, S_HEIGHT = [i // 1 for i in SIZE]
 screen = pg.display.set_mode(SIZE)
 display = pg.Surface(SCALED_SIZE)
 
@@ -20,10 +20,10 @@ player_group = pg.sprite.Group()
 tiles_group = pg.sprite.Group()
 walls_group = pg.sprite.Group()
 
-templates = []
+rooms = [[], [], [], [], []]  # index as a room type
 for file in os.listdir(os.path.join('data', 'levels')):
     with open(os.path.join('data', 'levels', file), 'r') as f:
-        templates.append([line.rstrip('\n') for line in list(f)])
+        rooms[int(file[0])].append([line.rstrip('\n') for line in list(f)])
 
 
 def generate_level(size):
@@ -59,9 +59,10 @@ def generate_level(size):
                 room_types[y][x] = 3
                 dir = randint(0, 4)
             else:
+                last_room = x, y
                 break
 
-    map = [[j for j in list_connect(*[templates[i] for i in line]) if j] for line in room_types]
+    map = [[j for j in list_connect(*[rooms[i][randint(0, len(rooms[i]) - 1)] for i in line]) if j] for line in room_types]
     return list_connect([['1'] for _ in range(size * 8)], [j for sub in map for j in sub], [['1'] for _ in range(size * 8)])
 
 
@@ -175,7 +176,7 @@ def main():
     for line in enumerate(level[:8]):
         possibles = [i for i in enumerate(line[1]) if i[1] == '@']
         spawns += [(i[0], line[0]) for i in possibles]
-    
+
     spawn_x, spawn_y = choice(spawns)
     player = Player(spawn_x, spawn_y)
     camera = Camera()
@@ -218,13 +219,13 @@ def main():
                 key = pg.key.get_pressed()
                 moving_left = key[pg.K_a] or key[pg.K_LEFT]
                 moving_right = key[pg.K_d] or key[pg.K_RIGHT]
-                if key[pg.K_w] or key[pg.K_UP]:
+                if key[pg.K_w] or key[pg.K_UP] or key[pg.K_SPACE]:
                     if air_timer < 5:
                         player.y_momentum = -5
             if event.type == pg.KEYUP:
                 key = pg.key.get_pressed()
-                moving_left = key[pg.K_a]
-                moving_right = key[pg.K_d]
+                moving_left = key[pg.K_a] or key[pg.K_LEFT]
+                moving_right = key[pg.K_d] or key[pg.K_RIGHT]
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
         pg.display.flip()
