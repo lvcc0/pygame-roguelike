@@ -1,14 +1,14 @@
 import pygame as pg
 import os
 import sys
-from random import randint, choice
+from random import randint, choice, sample
 
 from util import list_connect
 
 
 pg.init()
 SIZE = WIDTH, HEIGHT = 1280, 720
-SCALED_SIZE = S_WIDTH, S_HEIGHT = [i // 1 for i in SIZE]
+SCALED_SIZE = S_WIDTH, S_HEIGHT = [i // 4 for i in SIZE]
 screen = pg.display.set_mode(SIZE)
 display = pg.Surface(SCALED_SIZE)
 
@@ -19,6 +19,7 @@ all_sprites = pg.sprite.Group()
 player_group = pg.sprite.Group()
 tiles_group = pg.sprite.Group()
 walls_group = pg.sprite.Group()
+enemy_group = pg.sprite.Group()
 
 rooms = [[], [], [], [], []]  # index as a room type
 for file in os.listdir(os.path.join('data', 'levels')):
@@ -85,7 +86,7 @@ def load_level(map):
     x, y = None, None
     for y in range(len(map)):
         for x in range(len(map[y])):
-            if map[y][x] in ['0', '@']:
+            if map[y][x] in ['0', '@', 'e']:
                 Tile('empty', x, y)
             if map[y][x] == '1':
                 Tile('wall', x, y)
@@ -97,6 +98,9 @@ def load_level(map):
 tile_images = {
     'empty': load_image('empty.png'),
     'wall': load_image('wall.png')
+}
+enemy_images = {
+    'slime': load_image('slime.png')
 }
 player_image = load_image('player.png')
 tile_size = 16
@@ -113,17 +117,17 @@ class Tile(pg.sprite.Sprite):
         self.rect = self.image.get_rect().move(tile_size * x, tile_size * y)
 
 
-class Player(pg.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__(player_group, all_sprites)
+class Entity(pg.sprite.Sprite):
+    def __init__(self, x, y, image, groups, hp):
+        super().__init__(*groups)
 
         self.x = x
         self.y = y
-        self.image = player_image
+        self.image = image
         self.rect = self.image.get_rect().move(tile_size * x, tile_size * y)
-
-        self.speed = 2
-        self.y_momentum = 0
+        self.hp = hp
+        self.max_hp = self.hp
+        self.invincible_frames = 0
 
     def move(self, movement):
         collision_types = {'top': False, 'bottom': False, 'right': False, 'left': False}
@@ -150,6 +154,55 @@ class Player(pg.sprite.Sprite):
 
         return collision_types
 
+    def get_hit(self, attacker):
+        if not self.invincible_frames:
+            self.hp -= attacker.damage
+            self.invincible_frames = 60
+
+    def update(self):
+        if self.hp != self.max_hp:
+            pg.draw.rect(display, (200, 0, 0), (self.rect.x, self.rect.y - 5, self.rect.width, 2))
+            pg.draw.rect(display, (50, 255, 50), (self.rect.x, self.rect.y - 5, self.rect.width * self.hp // self.max_hp, 2))
+
+        if self.invincible_frames != 0:
+            self.invincible_frames -= 1
+
+
+class Player(Entity):
+    def __init__(self, x, y):
+        super().__init__(x, y, player_image, (player_group, all_sprites), 10)
+        self.y_momentum = 0
+        self.speed = 2
+
+
+class Enemy(Entity):
+    def __init__(self, x, y, image, hp, damage):
+        super().__init__(x, y, image, (all_sprites, enemy_group), hp)
+        self.damage = damage
+
+
+class Slime(Enemy):
+    def __init__(self, x, y):
+        super().__init__(x, y, enemy_images['slime'], 3, 1)
+        self.movement = [1, 0]
+        self.rays = [((self.rect.x, self.rect.bottom), (self.rect.x, self.rect.bottom + 4))]
+        
+    def update(self):
+        collisions = self.move(self.movement)
+
+        if collisions['right'] or collisions['left']:
+            self.movement[0] = -self.movement[0]
+
+        next_step_rect = self.rect.move(self.rect.width * self.movement[0], 4)
+        if next_step_rect.collidelist(list(walls_group)) == -1:
+            self.movement[0] = -self.movement[0]
+
+        if pg.sprite.spritecollide(self, player_group, False):
+            self.hit()
+
+    def hit(self):
+        player = pg.sprite.spritecollide(self, player_group, False)[0]
+        player.get_hit(self)
 
 class Camera:
     def __init__(self):
@@ -167,23 +220,32 @@ class Camera:
 
 def main():
     level = generate_level(5)
+    camera = Camera()
 
     level_x, level_y = load_level(level)
     moving_right = moving_left = False
     air_timer = 0
+    enemies = [Slime]
 
-    spawns = []
+    spawns = []  # spawn for a player
     for line in enumerate(level[:8]):
         possibles = [i for i in enumerate(line[1]) if i[1] == '@']
         spawns += [(i[0], line[0]) for i in possibles]
 
     spawn_x, spawn_y = choice(spawns)
     player = Player(spawn_x, spawn_y)
-    camera = Camera()
+
+    spawns = []  # enemy spawns
+    for line in enumerate(level):
+        possibles = [i for i in enumerate(line[1]) if i[1] == 'e']
+        spawns += [(i[0], line[0]) for i in possibles]
+    
+    for spawn in sample(spawns, len(spawns) // 2):
+        choice(enemies)(*choice(spawns))
 
     run = True
     while run:
-        display.fill((0, 0, 0))
+        display.fill((24, 20, 37))
 
         player_movement = [0, 0]
         if moving_right:
@@ -193,8 +255,8 @@ def main():
 
         player_movement[1] += player.y_momentum
         player.y_momentum += 0.4
-        if player.y_momentum > 4:
-            player.y_momentum = 6
+        if player.y_momentum > 5:
+            player.y_momentum = 5
 
         collisions = player.move(player_movement)
 
@@ -209,6 +271,7 @@ def main():
             camera.apply(sprite)
 
         all_sprites.draw(display)
+        all_sprites.update()
         player_group.draw(display)
 
         for event in pg.event.get():
