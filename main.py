@@ -1,6 +1,7 @@
 import pygame as pg
 import os
 import sys
+from math import atan2, pi
 from random import randint, choice, sample
 
 from util import list_connect
@@ -20,6 +21,7 @@ player_group = pg.sprite.Group()
 tiles_group = pg.sprite.Group()
 walls_group = pg.sprite.Group()
 enemy_group = pg.sprite.Group()
+weapon_group = pg.sprite.Group()
 
 rooms = [[], [], [], [], []]  # index as a room type
 for file in os.listdir(os.path.join('data', 'levels')):
@@ -102,7 +104,13 @@ tile_images = {
 enemy_images = {
     'slime': load_image('slime.png')
 }
-player_image = load_image('player.png')
+
+player_sheets = {
+    'idle': (load_image('player_idle4x1.png'), (4, 1)),
+    'run': (load_image('player_run4x1.png'), (4, 1))
+}
+
+slash_image = load_image('slash.png')
 tile_size = 16
 
 
@@ -118,16 +126,53 @@ class Tile(pg.sprite.Sprite):
 
 
 class Entity(pg.sprite.Sprite):
-    def __init__(self, x, y, image, groups, hp):
+    def __init__(self, x, y, groups, hp, sheets):
         super().__init__(*groups)
 
         self.x = x
         self.y = y
-        self.image = image
+
+        self.flipped = False
+        if type(sheets) == dict:
+            self.animated = True
+
+            self.sheets = sheets
+
+            self.anim_timer = 8  # frames per animation frame change
+            self.cur_anim_timer = self.anim_timer
+
+            self.frames = []
+            self.action = 'idle'
+            self.cut_sheet(sheets[self.action], *self.sheets[self.action][1])
+            self.cur_frame = 0
+            
+            self.image = self.frames[self.cur_frame]
+        else:
+            self.animated = False
+            self.image = sheets
+        
         self.rect = self.image.get_rect().move(tile_size * x, tile_size * y)
         self.hp = hp
         self.max_hp = self.hp
+        self.max_invincible_frames = 60
         self.invincible_frames = 0
+
+    def cut_sheet(self, sheet, cols, rows):
+        self.frames = []
+        self.anime_rect = pg.Rect(0, 0, sheet[0].get_width() // cols, sheet[0].get_height() // rows)
+
+        for i in range(rows):
+            for j in range(cols):
+                frame_loc = self.anime_rect.w * j, self.anime_rect.h * i
+                self.frames.append(sheet[0].subsurface(pg.Rect(frame_loc, self.anime_rect.size)))
+
+    def change_action(self, action, frame, new_value):
+        if action != new_value:
+            self.action = new_value
+            self.cut_sheet(self.sheets[self.action], *self.sheets[self.action][1])
+            frame = 0
+        
+        return self.action, frame
 
     def move(self, movement):
         collision_types = {'top': False, 'bottom': False, 'right': False, 'left': False}
@@ -157,27 +202,87 @@ class Entity(pg.sprite.Sprite):
     def get_hit(self, attacker):
         if not self.invincible_frames:
             self.hp -= attacker.damage
-            self.invincible_frames = 60
+            self.invincible_frames = self.max_invincible_frames
 
     def update(self):
         if self.hp != self.max_hp:
             pg.draw.rect(display, (200, 0, 0), (self.rect.x, self.rect.y - 5, self.rect.width, 2))
             pg.draw.rect(display, (50, 255, 50), (self.rect.x, self.rect.y - 5, self.rect.width * self.hp // self.max_hp, 2))
 
+        if self.animated:
+            if not self.cur_anim_timer:
+                self.cur_frame = (self.cur_frame + 1) % len(self.frames)
+                self.image = pg.transform.flip(self.frames[self.cur_frame], self.flipped, False)
+                self.cur_anim_timer = self.anim_timer
+            else:
+                self.cur_anim_timer -= 1
+        else:
+            self.image = pg.transform.flip(self.image, self.flipped, False)
+
         if self.invincible_frames != 0:
+            mask = pg.mask.from_surface(self.image).to_surface()
+            mask.set_colorkey((0, 0, 0))
+            mask.set_alpha(255 * (self.invincible_frames / self.max_invincible_frames))
+            display.blit(mask, (self.rect.x - 1, self.rect.y))
+            display.blit(mask, (self.rect.x + 1, self.rect.y))
+            display.blit(mask, (self.rect.x, self.rect.y - 1))
+            display.blit(mask, (self.rect.x, self.rect.y + 1))
+
             self.invincible_frames -= 1
+
+
+class Weapon(Entity):
+    def __init__(self, master, timer):
+        image = pg.transform.flip(slash_image, master.flipped, False)
+        super().__init__(master.rect.center[0] // 16, master.rect.y // 16, (all_sprites, weapon_group), 1, image)
+        self.damage = 1
+
+        self.timer = timer
+
+        if master.flipped:
+            self.rect = self.rect.move(-self.rect.width - 6, 0)
+        else:
+            self.rect = self.rect.move(6, 0)
+
+    def set_timer(self, timer):
+        self.timer = timer
+
+    def update(self):
+        super().update()
+
+        self.image.set_alpha(255 * (self.timer / 10))
+        for sprite in pg.sprite.spritecollide(self, enemy_group, False):
+            sprite.get_hit(self)
 
 
 class Player(Entity):
     def __init__(self, x, y):
-        super().__init__(x, y, player_image, (player_group, all_sprites), 10)
+        super().__init__(x, y, (player_group, all_sprites), 10, player_sheets) 
         self.y_momentum = 0
         self.speed = 2
+        self.attack_timer = 0
+        self.slashes = []
 
+    def attack(self):
+        self.attack_timer = 10
+
+        if self.attack_timer != 0:
+            weapon = Weapon(self, self.attack_timer)
+            self.slashes.append(weapon)
+
+    def update(self):
+        super().update()
+
+        if self.attack_timer != 0:
+            self.attack_timer -= 1
+            [sprite.set_timer(self.attack_timer) for sprite in self.slashes]
+        else:
+            [sprite.kill() for sprite in self.slashes]
+        
 
 class Enemy(Entity):
     def __init__(self, x, y, image, hp, damage):
-        super().__init__(x, y, image, (all_sprites, enemy_group), hp)
+        super().__init__(x, y, (all_sprites, enemy_group), hp, image)
         self.damage = damage
 
 
@@ -185,9 +290,11 @@ class Slime(Enemy):
     def __init__(self, x, y):
         super().__init__(x, y, enemy_images['slime'], 3, 1)
         self.movement = [1, 0]
-        self.rays = [((self.rect.x, self.rect.bottom), (self.rect.x, self.rect.bottom + 4))]
+        self.max_invincible_frames = 30
         
     def update(self):
+        super().update()
+
         collisions = self.move(self.movement)
 
         if collisions['right'] or collisions['left']:
@@ -219,7 +326,7 @@ class Camera:
 
 
 def main():
-    level = generate_level(5)
+    level = generate_level(6)
     camera = Camera()
 
     level_x, level_y = load_level(level)
@@ -258,6 +365,15 @@ def main():
         if player.y_momentum > 5:
             player.y_momentum = 5
 
+        if player_movement[0] == 0:
+            player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'idle')
+        if player_movement[0] > 0:
+            player.flipped = False
+            player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'run')
+        if player_movement[0] < 0:
+            player.flipped = True
+            player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'run')
+
         collisions = player.move(player_movement)
 
         if collisions['bottom']:
@@ -270,9 +386,17 @@ def main():
         for sprite in all_sprites:
             camera.apply(sprite)
 
-        all_sprites.draw(display)
-        all_sprites.update()
+        for s in all_sprites.sprites():  # drawing in fov
+            if -s.rect.width < s.rect.x < S_WIDTH and -s.rect.height < s.rect.y < S_HEIGHT:
+                display.blit(s.image, (s.rect.x, s.rect.y))
+                
+        for s in all_sprites.sprites():  # updating in fov + some more space
+            if (-s.rect.width * 2 < s.rect.x < S_WIDTH + s.rect.width * 2 and 
+                -s.rect.height * 2 < s.rect.y < S_HEIGHT + s.rect.height * 2):
+                s.update()
+
         player_group.draw(display)
+        weapon_group.draw(display)
 
         for event in pg.event.get():
             if event.type == pg.QUIT:
@@ -289,6 +413,9 @@ def main():
                 key = pg.key.get_pressed()
                 moving_left = key[pg.K_a] or key[pg.K_LEFT]
                 moving_right = key[pg.K_d] or key[pg.K_RIGHT]
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                if not player.attack_timer:
+                    player.attack()
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
         pg.display.flip()
