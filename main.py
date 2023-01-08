@@ -64,8 +64,12 @@ def generate_level(size):
             else:
                 break
 
-    map = [[j for j in util.list_connect(*[rooms[i][randint(0, len(rooms[i]) - 1)] for i in line]) if j] for line in room_types]
-    return util.list_connect([['1'] for _ in range(size * 8)], [j for sub in map for j in sub], [['1'] for _ in range(size * 8)])
+    map = []
+    h_border = [['1'] for _ in range(size * 8)]
+
+    for line in room_types:
+        map.append([j for j in util.con(*[rooms[i][randint(0, len(rooms[i]) - 1)] for i in line]) if j])
+    return util.con(h_border, [j for sub in map for j in sub], h_border)
 
 
 def load_image(name, colorkey=None):
@@ -87,8 +91,6 @@ def load_level(map):
     x, y = None, None
     for y in range(len(map)):
         for x in range(len(map[y])):
-            if map[y][x] in ['0', '@', 'e', 'x']:
-                Tile('empty', x, y)
             if map[y][x] == '1':
                 Tile('wall', x, y)
 
@@ -97,7 +99,6 @@ def load_level(map):
 
 # initializing all sprite images
 tile_images = {
-    'empty': load_image('empty.png'),
     'wall': load_image('wall.png'),
     'exit': load_image('exit.png')
 }
@@ -117,9 +118,7 @@ tile_size = 16
 
 class Tile(pg.sprite.Sprite):
     def __init__(self, tile_id, x, y):
-        if tile_id == 'empty':
-            super().__init__(tiles_group, all_sprites)
-        elif tile_id == 'exit':
+        if tile_id == 'exit':
             super().__init__(tiles_group, all_sprites, exit_group)
         else:
             super().__init__(tiles_group, all_sprites, walls_group)
@@ -223,7 +222,8 @@ class Entity(pg.sprite.Sprite):
     def update(self):
         if self.hp != self.max_hp:
             pg.draw.rect(display, (200, 0, 0), (self.rect.x, self.rect.y - 5, self.rect.width, 2))
-            pg.draw.rect(display, (50, 255, 50), (self.rect.x, self.rect.y - 5, self.rect.width * self.hp // self.max_hp, 2))
+            pg.draw.rect(display, (50, 255, 50), (self.rect.x, self.rect.y - 5,
+                         self.rect.width * self.hp // self.max_hp, 2))
 
         if self.hp <= 0:
             self.die()
@@ -256,7 +256,8 @@ class Entity(pg.sprite.Sprite):
 class Weapon(Entity):
     def __init__(self, master, timer):
         image = pg.transform.flip(slash_image, master.flipped, False)
-        super().__init__(master.rect.center[0] // 16, master.rect.y // 16, (all_sprites, weapon_group), 1, image)
+        super().__init__(master.rect.center[0] // 16, master.rect.y // 16,
+                         (all_sprites, weapon_group), 1, image)
         self.damage = 1
 
         self.master = master
@@ -379,18 +380,13 @@ def start_screen():
 
     while True:
         display.fill((24, 20, 37))
-        m_pos = [i // 4 for i in pg.mouse.get_pos()]
+        m_pos = pg.mouse.get_pos()
         
-        util.draw_text(':DDD', 14, (255, 255, 255), display, 10, 10)
-
-        play_b = pg.Rect(10, 50, 120, 35)
+        play_b = pg.Rect(10, 150, 360, 105)
 
         if play_b.collidepoint(m_pos):
             if click:
-                main(0)
-
-        pg.draw.rect(display, (255, 255, 255), play_b)
-        util.draw_text('start', 30, (24, 20, 37), display, play_b.x + 10, play_b[1])
+                main()
 
         click = False
         for event in pg.event.get():
@@ -404,6 +400,12 @@ def start_screen():
                     click = True
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
+
+        # everything that goes directly on screen surface (not display)
+        util.draw_text(':DDD', 64, (255, 255, 255), screen, 10, 10)
+        pg.draw.rect(screen, (255, 255, 255), play_b)
+        util.draw_text('start', 92, (24, 20, 37), screen, play_b.x + 20, play_b.y)
+
         pg.display.flip()
         clock.tick(FPS)
 
@@ -413,28 +415,20 @@ def lose_screen(final_score):
 
     while True:
         display.fill((24, 20, 37))
-        m_pos = [i // 4 for i in pg.mouse.get_pos()]
+        m_pos = pg.mouse.get_pos()
 
-        util.draw_text('u dead :(', 14, (255, 255, 255), display, 10, 10)
-        util.draw_text(f'final score: {final_score}', 14, (255, 255, 255), display, 150, 10)
-
-        restart_b = pg.Rect(10, 50, 120, 35)
-        end_b = pg.Rect(10, 100, 120, 35)
+        restart_b = pg.Rect(10, 150, 360, 105)
+        end_b = pg.Rect(10, 300, 360, 105)
 
         if restart_b.collidepoint(m_pos):
             if click:
                 for sprite in all_sprites:
                     sprite.kill()
 
-                main(0)
+                main()
         if end_b.collidepoint(m_pos):
             if click:
                 util.terminate()
-
-        pg.draw.rect(display, (255, 255, 255), restart_b)
-        util.draw_text('restart', 30, (24, 20, 37), display, restart_b.x + 10, restart_b[1])
-        pg.draw.rect(display, (255, 255, 255), end_b)
-        util.draw_text('quit', 30, (24, 20, 37), display, end_b.x + 10, end_b[1])
 
         click = False
         for event in pg.event.get():
@@ -448,6 +442,14 @@ def lose_screen(final_score):
                     click = True
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
+
+        util.draw_text('u dead :(', 64, (255, 255, 255), screen, 10, 10)
+        util.draw_text(f'final score: {final_score}', 64, (255, 255, 255), screen, WIDTH // 2 - 50, 10)
+        pg.draw.rect(screen, (255, 255, 255), restart_b)
+        util.draw_text('restart', 92, (24, 20, 37), screen, restart_b.x + 20, restart_b.y)
+        pg.draw.rect(screen, (255, 255, 255), end_b)
+        util.draw_text('quit', 92, (24, 20, 37), screen, end_b.x + 20, end_b.y)
+
         pg.display.flip()
         clock.tick(FPS)
 
@@ -457,28 +459,20 @@ def win_screen(final_score):
 
     while True:
         display.fill((24, 20, 37))
-        m_pos = [i // 4 for i in pg.mouse.get_pos()]
+        m_pos = pg.mouse.get_pos()
 
-        util.draw_text('u won :D', 14, (255, 255, 255), display, 10, 10)
-        util.draw_text(f'final score: {final_score}', 14, (255, 255, 255), display, 150, 10)
-
-        restart_b = pg.Rect(10, 50, 120, 35)
-        end_b = pg.Rect(10, 100, 120, 35)
+        restart_b = pg.Rect(10, 150, 360, 105)
+        end_b = pg.Rect(10, 300, 360, 105)
 
         if restart_b.collidepoint(m_pos):
             if click:
                 for sprite in all_sprites:
                     sprite.kill()
 
-                main(0)
+                main()
         if end_b.collidepoint(m_pos):
             if click:
                 util.terminate()
-
-        pg.draw.rect(display, (255, 255, 255), restart_b)
-        util.draw_text('restart', 30, (24, 20, 37), display, restart_b.x + 10, restart_b[1])
-        pg.draw.rect(display, (255, 255, 255), end_b)
-        util.draw_text('quit', 30, (24, 20, 37), display, end_b.x + 10, end_b[1])
 
         click = False
         for event in pg.event.get():
@@ -492,16 +486,24 @@ def win_screen(final_score):
                     click = True
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
+
+        util.draw_text('u won :D', 64, (255, 255, 255), screen, 10, 10)
+        util.draw_text(f'final score: {final_score}', 64, (255, 255, 255), screen, WIDTH // 2 - 50, 10)
+        pg.draw.rect(screen, (255, 255, 255), restart_b)
+        util.draw_text('restart', 92, (24, 20, 37), screen, restart_b.x + 20, restart_b.y)
+        pg.draw.rect(screen, (255, 255, 255), end_b)
+        util.draw_text('quit', 92, (24, 20, 37), screen, end_b.x + 20, end_b.y)
+
         pg.display.flip()
         clock.tick(FPS)
 
 
-def main(score):
-    size = 6
+def main():
+    size = 7
     level = generate_level(size)
     camera = Camera()
 
-    level_x, level_y = load_level(level)
+    load_level(level)
     moving_right = moving_left = False
     air_timer = 0
     enemies = [Slime]
@@ -547,13 +549,16 @@ def main(score):
                 player.y_momentum = 5
 
             if player_movement[0] == 0:
-                player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'idle')
+                player.action, player.cur_frame = player.change_action(player.action,
+                                                                       player.cur_frame, 'idle')
             if player_movement[0] > 0:
                 player.flipped = False
-                player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'run')
+                player.action, player.cur_frame = player.change_action(player.action,
+                                                                       player.cur_frame, 'run')
             if player_movement[0] < 0:
                 player.flipped = True
-                player.action, player.cur_frame = player.change_action(player.action, player.cur_frame, 'run')
+                player.action, player.cur_frame = player.change_action(player.action,
+                                                                       player.cur_frame, 'run')
 
             collisions = player.move(player_movement)
 
@@ -579,8 +584,6 @@ def main(score):
         player_group.draw(display)
         weapon_group.draw(display)
 
-        util.draw_text(f'score: {player.score}', 8, (255, 255, 255), display, 5, 5)
-
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 run = False
@@ -601,6 +604,9 @@ def main(score):
                     player.attack()
 
         screen.blit(pg.transform.scale(display, SIZE), (0, 0))
+
+        util.draw_text(f'score: {player.score}', 32, (255, 255, 255), screen, 25, 25)
+
         pg.display.flip()
         clock.tick(FPS)
 

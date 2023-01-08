@@ -2,7 +2,7 @@ import pygame as pg
 import sys
 
 
-def list_connect(*lists):
+def con(*lists):  # stand for connect (list connect)
     res = [[]]
     for i in range(max([len(lst) for lst in lists])):
         res.append([])
